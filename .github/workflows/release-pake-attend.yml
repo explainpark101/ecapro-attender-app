@@ -1,0 +1,173 @@
+# Manual-only release: package https://pro.ecaplus.co.kr/attend/login with Pake
+# for macOS (universal DMG) and Windows (x64 + arm64 MSI), then attach to a GitHub Release.
+# Docs: https://github.com/tw93/Pake
+name: Release Attend Desktop (Pake)
+
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: "Release tag (e.g. v1.0.0)"
+        required: true
+        type: string
+        default: "v1.0.0"
+      width:
+        description: "Window width (px)"
+        required: false
+        type: string
+        default: "1280"
+      height:
+        description: "Window height (px)"
+        required: false
+        type: string
+        default: "800"
+      fullscreen:
+        description: "Start in fullscreen (kiosk)"
+        required: false
+        type: boolean
+        default: true
+
+permissions:
+  contents: write
+
+env:
+  APP_URL: https://pro.ecaplus.co.kr/attend/login
+  APP_NAME: EcaProAttend
+  NODE_VERSION: "22"
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.runner }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - label: macos-universal
+            runner: macos-latest
+            pake_target: universal
+            asset_name: EcaProAttend_macos_universal.dmg
+            artifact_ext: dmg
+            rust_targets: aarch64-apple-darwin,x86_64-apple-darwin
+          - label: windows-x64
+            runner: windows-latest
+            pake_target: x64
+            asset_name: EcaProAttend_windows_x64.msi
+            artifact_ext: msi
+            rust_targets: x86_64-pc-windows-msvc
+          - label: windows-arm64
+            # Native ARM64 runner (free for public repos). Private repos may need
+            # a larger ARM runner or switch this to windows-latest + cross-compile.
+            runner: windows-11-arm
+            pake_target: arm64
+            asset_name: EcaProAttend_windows_arm64.msi
+            artifact_ext: msi
+            rust_targets: aarch64-pc-windows-msvc
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: ${{ matrix.rust_targets }}
+
+      - name: Install pake-cli
+        run: npm install -g pake-cli
+
+      - name: Derive app version
+        id: ver
+        shell: bash
+        run: |
+          TAG="${{ inputs.version }}"
+          echo "app_version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Build with Pake
+        shell: bash
+        timeout-minutes: 50
+        run: |
+          set -euo pipefail
+          args=(
+            "${{ env.APP_URL }}"
+            --name "${{ env.APP_NAME }}"
+            --targets "${{ matrix.pake_target }}"
+            --app-version "${{ steps.ver.outputs.app_version }}"
+            --width "${{ inputs.width }}"
+            --height "${{ inputs.height }}"
+          )
+          if [[ "${{ matrix.artifact_ext }}" == "msi" ]]; then
+            args+=(--installer-language ko-KR)
+          fi
+          if [[ "${{ inputs.fullscreen }}" == "true" ]]; then
+            args+=(--fullscreen)
+          fi
+          echo "Running: pake ${args[*]}"
+          pake "${args[@]}"
+
+      - name: Stage release asset
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p release-assets
+          OUT="${{ matrix.asset_name }}"
+          EXT="${{ matrix.artifact_ext }}"
+          APP="${{ env.APP_NAME }}"
+          found=""
+          if [[ -f "./${APP}.${EXT}" ]]; then
+            found="./${APP}.${EXT}"
+          else
+            shopt -s nullglob
+            matches=(./"${APP}"*."${EXT}")
+            shopt -u nullglob
+            if ((${#matches[@]} > 0)); then
+              found="${matches[0]}"
+            else
+              found="$(find . -type f -name "*.${EXT}" ! -path './release-assets/*' | head -n 1 || true)"
+            fi
+          fi
+          if [[ -z "$found" || ! -f "$found" ]]; then
+            echo "No .${EXT} found after Pake build" >&2
+            find . -type f -name "*.${EXT}" -print || true
+            exit 1
+          fi
+          cp -f "$found" "release-assets/${OUT}"
+          echo "Staged: release-assets/${OUT} (from ${found})"
+          ls -la release-assets/
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.APP_NAME }}-${{ matrix.label }}
+          path: release-assets/${{ matrix.asset_name }}
+          if-no-files-found: error
+          retention-days: 14
+
+  release:
+    name: Create GitHub Release
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: release-assets
+          merge-multiple: true
+
+      - name: List assets
+        run: ls -la release-assets/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ inputs.version }}
+          name: EcaPro Attend Desktop ${{ inputs.version }}
+          generate_release_notes: true
+          files: |
+            release-assets/*
