@@ -56,14 +56,14 @@ jobs:
             asset_name: EcaProAttend_windows_x64.msi
             artifact_ext: msi
             rust_targets: x86_64-pc-windows-msvc
-          - label: windows-arm64
-            # Native ARM64 runner (free for public repos). Private repos may need
-            # a larger ARM runner or switch this to windows-latest + cross-compile.
-            runner: windows-11-arm
-            pake_target: arm64
-            asset_name: EcaProAttend_windows_arm64.msi
-            artifact_ext: msi
-            rust_targets: aarch64-pc-windows-msvc
+          # - label: windows-arm64
+          #   # Native ARM64 runner (free for public repos). Private repos may need
+          #   # a larger ARM runner or switch this to windows-latest + cross-compile.
+          #   runner: windows-11-arm
+          #   pake_target: arm64
+          #   asset_name: EcaProAttend_windows_arm64.msi
+          #   artifact_ext: msi
+          #   rust_targets: aarch64-pc-windows-msvc
 
     steps:
       - name: Checkout
